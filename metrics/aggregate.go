@@ -117,6 +117,9 @@ func (a *Aggregate) parseAndMerge(r io.Reader, labels []labelPair) error {
 	}
 
 	for name, family := range inFamilies {
+		if len(family.Metric) == 0 {
+			continue
+		}
 		// Sort labels in case source sends them inconsistently
 		for _, m := range family.Metric {
 			a.formatLabels(m, labels)
@@ -159,6 +162,10 @@ func (a *Aggregate) encodeAllMetrics(writer io.Writer, contentType expfmt.Format
 	metricNames := []string{}
 	metricTypeCounts := make(map[string]int)
 	for name, family := range a.families {
+		if len(family.Metric) == 0 {
+			continue
+		}
+
 		metricNames = append(metricNames, name)
 		var typeName string
 		if family.Type == nil {
@@ -173,7 +180,7 @@ func (a *Aggregate) encodeAllMetrics(writer io.Writer, contentType expfmt.Format
 
 	for _, name := range metricNames {
 		if a.encodeMetric(name, enc) {
-			return
+			continue
 		}
 	}
 
