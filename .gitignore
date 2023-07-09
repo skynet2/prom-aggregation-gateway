@@ -1,3 +1,5 @@
 /prom-aggregation-gateway
 /.vscode
 /dist
+
+.idea/
