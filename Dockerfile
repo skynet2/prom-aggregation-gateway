@@ -1,5 +1,5 @@
 # builder image
-FROM golang:1.19-alpine3.16 as builder
+FROM golang:alpine as builder
 
 ARG COMMIT_SHA
 ARG VERSION_TAG
@@ -12,7 +12,7 @@ WORKDIR /build
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X ${GO_MOD_PATH}/config.CommitSHA=${COMMIT_SHA} -X ${GO_MOD_PATH}/config.Version=${VERSION_TAG}" -a -o prom-aggregation-gateway .
 
 # generate clean, final image for end users
-FROM alpine:3.16
+FROM alpine
 COPY --chown=nobody:nogroup --from=builder /build/prom-aggregation-gateway .
 
 USER 65534
