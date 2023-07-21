@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/gin-gonic/gin"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -31,6 +34,7 @@ type ignoredLabels []string
 type aggregateOptions struct {
 	ignoredLabels     ignoredLabels
 	metricTTLDuration *time.Duration
+	aggregateDeley    time.Duration
 }
 
 type AggregateOptionsFunc func(a *Aggregate)
@@ -47,11 +51,18 @@ func SetTTLMetricTime(duration *time.Duration) AggregateOptionsFunc {
 	}
 }
 
+func SetAggregateDelay(duration time.Duration) AggregateOptionsFunc {
+	return func(a *Aggregate) {
+		a.options.aggregateDeley = duration
+	}
+}
+
 func NewAggregate(opts ...AggregateOptionsFunc) *Aggregate {
 	a := &Aggregate{
 		families: map[string]*metricFamily{},
 		options: aggregateOptions{
-			ignoredLabels: []string{},
+			ignoredLabels:  []string{},
+			aggregateDeley: 10 * time.Second,
 		},
 	}
 
@@ -61,6 +72,8 @@ func NewAggregate(opts ...AggregateOptionsFunc) *Aggregate {
 
 	a.options.formatOptions()
 
+	fmt.Println("aggregate options")
+	fmt.Println(spew.Sdump(a.options))
 	return a
 }
 
@@ -205,29 +218,35 @@ func (a *Aggregate) encodeMetric(name string, enc expfmt.Encoder) bool {
 var ErrOddNumberOfLabelParts = errors.New("labels must be defined in pairs")
 
 func (a *Aggregate) HandleInsert(c *gin.Context) {
-	labelParts, jobName, err := parseLabelsInPath(c)
+	labelString := c.Param("labels")
+	bodyData, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Println(err)
 		http.Error(c.Writer, err.Error(), http.StatusBadRequest)
-		return
 	}
 
-	if err := a.parseAndMerge(c.Request.Body, labelParts); err != nil {
-		log.Println(err)
-		http.Error(c.Writer, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	MetricPushes.WithLabelValues(jobName).Inc()
 	c.Status(http.StatusAccepted)
+	go func() {
+		time.Sleep(a.options.aggregateDeley)
+		labelParts, jobName, err := parseLabelsInPath(labelString)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		if err := a.parseAndMerge(bytes.NewBuffer(bodyData), labelParts); err != nil {
+			return
+		}
+
+		MetricPushes.WithLabelValues(jobName).Inc()
+	}()
 }
 
 type labelPair struct {
 	name, value string
 }
 
-func parseLabelsInPath(c *gin.Context) ([]labelPair, string, error) {
-	labelString := c.Param("labels")
+func parseLabelsInPath(labelString string) ([]labelPair, string, error) {
 	labelString = strings.Trim(labelString, "/")
 	if labelString == "" {
 		return nil, "", nil
