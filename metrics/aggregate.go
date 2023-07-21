@@ -33,21 +33,21 @@ type aggregateOptions struct {
 	metricTTLDuration *time.Duration
 }
 
-type aggregateOptionsFunc func(a *Aggregate)
+type AggregateOptionsFunc func(a *Aggregate)
 
-func AddIgnoredLabels(ignoredLabels ...string) aggregateOptionsFunc {
+func AddIgnoredLabels(ignoredLabels ...string) AggregateOptionsFunc {
 	return func(a *Aggregate) {
 		a.options.ignoredLabels = ignoredLabels
 	}
 }
 
-func SetTTLMetricTime(duration *time.Duration) aggregateOptionsFunc {
+func SetTTLMetricTime(duration *time.Duration) AggregateOptionsFunc {
 	return func(a *Aggregate) {
 		a.options.metricTTLDuration = duration
 	}
 }
 
-func NewAggregate(opts ...aggregateOptionsFunc) *Aggregate {
+func NewAggregate(opts ...AggregateOptionsFunc) *Aggregate {
 	a := &Aggregate{
 		families: map[string]*metricFamily{},
 		options: aggregateOptions{

@@ -4,10 +4,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
 	promMetrics "github.com/slok/go-http-metrics/metrics/prometheus"
+
 	"github.com/zapier/prom-aggregation-gateway/metrics"
 )
 
@@ -15,7 +17,13 @@ func RunServers(cfg ApiRouterConfig, apiListen string, lifecycleListen string) {
 	sigChannel := make(chan os.Signal, 1)
 	signal.Notify(sigChannel, syscall.SIGTERM, syscall.SIGINT)
 
-	agg := metrics.NewAggregate()
+	var opts []metrics.AggregateOptionsFunc
+	ignoredLabels := os.Getenv("IGNORED_LABELS")
+	if len(ignoredLabels) != 0 {
+		opts = append(opts, metrics.AddIgnoredLabels(strings.Split(ignoredLabels, ",")...))
+	}
+
+	agg := metrics.NewAggregate(opts...)
 
 	promMetricsConfig := promMetrics.Config{
 		Registry: metrics.PromRegistry,
