@@ -20,7 +20,8 @@ import (
 
 type metricFamily struct {
 	*dto.MetricFamily
-	lock sync.RWMutex
+	lock      sync.RWMutex
+	expiresAt *time.Time
 }
 
 type Aggregate struct {
@@ -104,10 +105,23 @@ func (a *Aggregate) setFamilyOrGetExistingFamily(familyName string, family *dto.
 	defer a.familiesLock.Unlock()
 	existingFamily, ok := a.families[familyName]
 	if !ok {
-		a.families[familyName] = &metricFamily{MetricFamily: family}
+		fm := &metricFamily{MetricFamily: family}
+		a.adjustTTL(fm)
+
+		a.families[familyName] = fm
+
 		return nil
 	}
 	return existingFamily
+}
+
+func (a *Aggregate) adjustTTL(family *metricFamily) {
+	if a.options.metricTTLDuration == nil {
+		return
+	}
+
+	exp := time.Now().Add(*a.options.metricTTLDuration)
+	family.expiresAt = &exp
 }
 
 func (a *Aggregate) saveFamily(familyName string, family *dto.MetricFamily) error {
@@ -117,6 +131,8 @@ func (a *Aggregate) saveFamily(familyName string, family *dto.MetricFamily) erro
 		if err != nil {
 			return err
 		}
+
+		a.adjustTTL(existingFamily)
 	}
 
 	return nil
@@ -176,6 +192,11 @@ func (a *Aggregate) encodeAllMetrics(writer io.Writer, contentType expfmt.Format
 	metricTypeCounts := make(map[string]int)
 	for name, family := range a.families {
 		if len(family.Metric) == 0 {
+			continue
+		}
+
+		if family.expiresAt != nil && family.expiresAt.Before(time.Now()) {
+			delete(a.families, name)
 			continue
 		}
 
