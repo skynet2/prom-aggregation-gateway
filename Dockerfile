@@ -3,10 +3,11 @@ FROM golang:alpine as builder
 WORKDIR /app
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o app .
+RUN GOOS=linux go build -o app .
 
 FROM alpine:latest
-WORKDIR /root/
+run mkdir -p /opt/pushgateway
+WORKDIR /opt/pushgateway
 COPY --from=builder /app/app .
 
 ENTRYPOINT ["./app"]
