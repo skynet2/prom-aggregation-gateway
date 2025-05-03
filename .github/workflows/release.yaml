@@ -13,9 +13,6 @@ jobs:
   docker-build:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
     permissions:
       contents: read
       packages: write
@@ -37,12 +34,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.arch }} image
+      - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          platforms: linux/${{ matrix.arch }}
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
