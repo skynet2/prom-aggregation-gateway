@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -14,13 +15,15 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gin-gonic/gin"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 )
 
 type metricFamily struct {
 	*dto.MetricFamily
-	lock sync.RWMutex
+	lock  sync.RWMutex
+	cache *expirable.LRU[string, struct{}]
 }
 
 type Aggregate struct {
@@ -104,7 +107,11 @@ func (a *Aggregate) setFamilyOrGetExistingFamily(familyName string, family *dto.
 	defer a.familiesLock.Unlock()
 	existingFamily, ok := a.families[familyName]
 	if !ok {
-		a.families[familyName] = &metricFamily{MetricFamily: family}
+		fm := &metricFamily{MetricFamily: family}
+
+		a.families[familyName] = fm
+		a.setFmTtl(fm, family)
+
 		return nil
 	}
 	return existingFamily
@@ -117,9 +124,38 @@ func (a *Aggregate) saveFamily(familyName string, family *dto.MetricFamily) erro
 		if err != nil {
 			return err
 		}
+
+		a.setFmTtl(existingFamily, family)
 	}
 
 	return nil
+}
+
+func (a *Aggregate) setFmTtl(
+	family *metricFamily,
+	initial *dto.MetricFamily,
+) {
+	if a.options.metricTTLDuration == nil {
+		return
+	}
+
+	if family.cache == nil {
+		family.cache = expirable.NewLRU[string, struct{}](math.MaxInt, nil, *a.options.metricTTLDuration)
+	}
+
+	for _, inputMetrics := range initial.Metric {
+		family.cache.Add(a.labelsToString(inputMetrics.Label), struct{}{})
+	}
+}
+
+func (a *Aggregate) labelsToString(labels []*dto.LabelPair) string {
+	var sb strings.Builder
+
+	for _, label := range labels {
+		sb.WriteString(label.String())
+	}
+
+	return sb.String()
 }
 
 func (a *Aggregate) parseAndMerge(r io.Reader, labels []labelPair) error {
@@ -177,6 +213,18 @@ func (a *Aggregate) encodeAllMetrics(writer io.Writer, contentType expfmt.Format
 	for name, family := range a.families {
 		if len(family.Metric) == 0 {
 			continue
+		}
+
+		if family.cache != nil {
+			var nonExpiredMetrics []*dto.Metric
+
+			for _, m := range family.Metric {
+				if _, ok := family.cache.Get(a.labelsToString(m.Label)); ok {
+					nonExpiredMetrics = append(nonExpiredMetrics, m)
+				}
+			}
+
+			family.Metric = nonExpiredMetrics
 		}
 
 		metricNames = append(metricNames, name)
